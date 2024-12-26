@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, Sun, Moon, Settings, Info } from 'lucide-react';
+import { Upload, Sun, Moon, Info, Search, X } from 'lucide-react';
 
 const WhatsAppViewer = () => {
   const [messages, setMessages] = useState([]);
   const [currentUser, setCurrentUser] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isInfoVisible, setIsInfoVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [matchedIndexes, setMatchedIndexes] = useState([]);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const chatContainerRef = useRef(null);
 
-  // Previous parsing functions remain the same...
   const parseDateTime = (dateTimeStr) => {
     return dateTimeStr.trim();
   };
@@ -45,6 +47,55 @@ const WhatsAppViewer = () => {
     return null;
   };
 
+  const handleSearch = (query) => {
+    setSearchQuery(query);
+    if (!query.trim()) {
+      setMatchedIndexes([]);
+      setCurrentMatchIndex(0);
+      return;
+    }
+
+    const matches = messages.reduce((acc, msg, index) => {
+      const content = msg.content.toLowerCase();
+      const sender = msg.sender.toLowerCase();
+      const searchLower = query.toLowerCase();
+      
+      if (content.includes(searchLower) || sender.includes(searchLower)) {
+        acc.push(index);
+      }
+      return acc;
+    }, []);
+
+    setMatchedIndexes(matches);
+    setCurrentMatchIndex(matches.length > 0 ? 0 : -1);
+
+    // Scroll to first match
+    if (matches.length > 0) {
+      scrollToMessage(matches[0]);
+    }
+  };
+
+  const scrollToMessage = (index) => {
+    const element = document.getElementById(`message-${index}`);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  const navigateSearch = (direction) => {
+    if (matchedIndexes.length === 0) return;
+    
+    let newIndex;
+    if (direction === 'next') {
+      newIndex = (currentMatchIndex + 1) % matchedIndexes.length;
+    } else {
+      newIndex = (currentMatchIndex - 1 + matchedIndexes.length) % matchedIndexes.length;
+    }
+    
+    setCurrentMatchIndex(newIndex);
+    scrollToMessage(matchedIndexes[newIndex]);
+  };
+
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -69,11 +120,16 @@ const WhatsAppViewer = () => {
     }
   };
 
-  useEffect(() => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [messages]);
+  // Highlight matching text in the message
+  const highlightText = (text, query) => {
+    if (!query.trim()) return text;
+    
+    const parts = text.split(new RegExp(`(${query})`, 'gi'));
+    return parts.map((part, i) => 
+      part.toLowerCase() === query.toLowerCase() ? 
+        <span key={i} className="bg-yellow-300 dark:bg-yellow-700">{part}</span> : part
+    );
+  };
 
   return (
     <div className={`flex flex-col h-full ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
@@ -98,6 +154,44 @@ const WhatsAppViewer = () => {
 
               {/* Controls */}
               <div className="flex items-center justify-between sm:justify-end space-x-2 sm:space-x-4">
+                {messages.length > 0 && (
+                  <div className="relative flex items-center">
+                    <Search className={`absolute left-2 w-4 h-4 ${
+                      isDarkMode ? 'text-gray-400' : 'text-gray-500'
+                    }`} />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => handleSearch(e.target.value)}
+                      placeholder="Search messages..."
+                      className={`pl-8 pr-20 py-1.5 rounded-lg text-sm ${
+                        isDarkMode 
+                          ? 'bg-gray-700 text-white placeholder-gray-400 border-gray-600' 
+                          : 'bg-gray-100 text-gray-900 placeholder-gray-500 border-gray-200'
+                      } border focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                    />
+                    {searchQuery && (
+                      <>
+                        <div className={`absolute right-8 text-xs ${
+                          isDarkMode ? 'text-gray-300' : 'text-gray-600'
+                        }`}>
+                          {matchedIndexes.length > 0 ? 
+                            `${currentMatchIndex + 1}/${matchedIndexes.length}` : 
+                            'No results'}
+                        </div>
+                        <button
+                          onClick={() => handleSearch('')}
+                          className={`absolute right-2 p-1 rounded-full ${
+                            isDarkMode ? 'hover:bg-gray-600' : 'hover:bg-gray-200'
+                          }`}
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
                 <button
                   onClick={() => setIsDarkMode(!isDarkMode)}
                   className={`p-2 rounded-full ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}
@@ -141,6 +235,7 @@ const WhatsAppViewer = () => {
                 <li>Export your WhatsApp chat (Open chat → Menu → More → Export chat)</li>
                 <li>Choose 'Without Media' when exporting</li>
                 <li>Click 'Upload Chat' and select the exported .txt file</li>
+                <li>Use the search bar to find specific messages or senders</li>
               </ol>
             </div>
           )}
@@ -160,7 +255,7 @@ const WhatsAppViewer = () => {
             ? 'radial-gradient(circle at center, #242424 1px, transparent 1px)' 
             : 'radial-gradient(circle at center, #e5e7eb 1px, transparent 1px)',
           backgroundSize: '20px 20px',
-          paddingBottom: '4rem' // Space for attribution
+          paddingBottom: '4rem'
         }}
       >
         {messages.length === 0 ? (
@@ -175,11 +270,14 @@ const WhatsAppViewer = () => {
           messages.map((message, index) => (
             <div
               key={index}
+              id={`message-${index}`}
               className={`flex ${message.isSystem ? 'justify-center' : 
                 message.sender === currentUser ? 'justify-end' : 'justify-start'}`}
             >
               <div
                 className={`max-w-[85%] sm:max-w-[70%] rounded-lg p-2 sm:p-3 shadow-sm ${
+                  matchedIndexes.includes(index) ? 'ring-2 ring-yellow-500' : ''
+                } ${
                   message.isSystem 
                     ? isDarkMode ? 'bg-gray-800 text-gray-300' : 'bg-gray-200 text-gray-600'
                     : message.sender === currentUser
@@ -191,7 +289,7 @@ const WhatsAppViewer = () => {
                   <div className={`text-xs sm:text-sm font-semibold ${
                     isDarkMode ? 'text-blue-400' : 'text-blue-600'
                   }`}>
-                    {message.sender}
+                    {highlightText(message.sender, searchQuery)}
                   </div>
                 )}
                 <div className={`break-words text-sm sm:text-base ${
@@ -202,7 +300,7 @@ const WhatsAppViewer = () => {
                   {message.isMedia ? (
                     <span className="italic opacity-75">Media file</span>
                   ) : (
-                    message.content
+                    highlightText(message.content, searchQuery)
                   )}
                   {message.isEdited && (
                     <span className="text-xs opacity-75 ml-2 italic">
@@ -222,6 +320,41 @@ const WhatsAppViewer = () => {
           ))
         )}
       </div>
+
+      {/* Search Navigation */}
+      {matchedIndexes.length > 0 && (
+        <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-20">
+          <div className={`flex items-center space-x-2 px-4 py-2 rounded-lg shadow-lg ${
+            isDarkMode ? 'bg-gray-800' : 'bg-white'
+          }`}>
+            <button
+              onClick={() => navigateSearch('prev')}
+              className={`p-1.5 rounded-md ${
+                isDarkMode 
+                  ? 'hover:bg-gray-700 text-gray-300' 
+                  : 'hover:bg-gray-100 text-gray-600'
+              }`}
+            >
+              ←
+            </button>
+            <span className={`text-sm ${
+              isDarkMode ? 'text-gray-300' : 'text-gray-600'
+            }`}>
+              {currentMatchIndex + 1} of {matchedIndexes.length}
+            </span>
+            <button
+              onClick={() => navigateSearch('next')}
+              className={`p-1.5 rounded-md ${
+                isDarkMode 
+                  ? 'hover:bg-gray-700 text-gray-300' 
+                  : 'hover:bg-gray-100 text-gray-600'
+              }`}
+            >
+              →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
